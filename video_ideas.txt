@@ -1,0 +1,75 @@
+[IDEA]
+
+name = The Cat Waited At The Shelter Gate
+
+# Hook (opening image + motion prompt)
+
+hook_image_prompt = A raw, unfiltered eye-level mobile phone photograph showing the entrance of an old rural animal shelter during cold late autumn. A rusty metal gate stands half open. Sitting directly in front of it is a small orange-and-white rescue cat with messy fur and a faded blue collar. Next to the cat lies a worn dog toy rope with bite marks. In the background, inside the fenced yard, a young Golden Retriever puppy is being carried away by a family toward a car. The puppy is looking back toward the cat. Flat cloudy daylight, muted colors, slightly desaturated, realistic dirt textures, no cinematic grading, iPhone realism, vertical 9:16.
+
+hook_video_prompt = Static handheld camera, no zoom, no camera movement, slight natural handheld shake only. Filmed on iPhone. Animate the scene naturally. The family slowly walks away carrying the puppy while the orange-white cat remains motionless near the gate. The puppy looks back and whimpers softly. Wind moves dry leaves across the ground. No music. Important sound effects: puppy crying softly, distant shelter ambience, wind.
+
+# Grid 1 (story panel 1 — uses Hook image as reference)
+
+grid1_image_prompt = A 2x3 grid of six borderless raw mobile phone photographs continuing the emotional story. Visual consistency with the orange-white rescue cat, blue collar, Golden Retriever puppy, old shelter entrance and muted autumn colors.
+
+Panel 1: Interior shelter room. The puppy and cat sleep together inside a small blanket basket.
+
+Panel 2: Outdoor shelter yard. The puppy and cat play together with the rope toy lying on dusty ground.
+
+Panel 3: Close eye-level shot. The puppy licks the cat while the cat closes its eyes peacefully.
+
+Panel 4: Shelter entrance. A smiling family kneels beside the Golden Retriever puppy preparing adoption papers.
+
+Panel 5: The puppy is being carried toward the parked car while looking back toward the gate.
+
+Panel 6: The orange-white cat sits alone at the shelter gate after sunset. The rope toy lies beside it.
+
+Lighting and Atmosphere: Cloudy autumn daylight, muted colors, realistic shelter environment, no cinematic grading, raw iPhone look, borderless 2x3 grid.
+
+grid1_video_prompt = Animate each panel separately for 2.5 seconds. Global style: Raw handheld iPhone footage with natural shake only. No zoom or cinematic movement. No music.
+
+1 [Top-Left]: Animate both animals sleeping quietly together; subtle breathing motion.
+
+2 [Top-Right]: Animate the puppy running circles while the cat bats the rope toy.
+
+3 [Mid-Left]: Animate the puppy gently licking the cat; cat slowly closes eyes.
+
+4 [Mid-Right]: Animate the family kneeling and smiling while interacting with the puppy.
+
+5 [Bottom-Left]: Animate the family carrying the puppy toward the car while it turns back.
+
+6 [Bottom-Right]: Animate evening wind moving leaves while the cat waits alone at the gate.
+
+# Grid 2 (story panel 2 — uses Grid 1 image as reference)
+
+grid2_image_prompt = A 2x3 grid of six borderless raw mobile phone photographs continuing the story with visual consistency: orange-white cat with blue collar, Golden Retriever puppy, realistic rural environment.
+
+Panel 1: Winter morning outside the shelter. Snow on the ground. The cat still waits near the same gate.
+
+Panel 2: Wide road shot. A family car stops outside the shelter.
+
+Panel 3: Car door opens. The now slightly older Golden Retriever jumps out excitedly.
+
+Panel 4: The dog runs at full speed toward the shelter gate.
+
+Panel 5: Emotional reunion. The Golden Retriever reaches the cat and presses its head against it.
+
+Panel 6: Final eye-level photo. The family walks away together carrying both the cat and dog. The old rope toy remains on the empty ground near the shelter gate.
+
+Lighting and Atmosphere: Cold winter daylight, realistic snow textures, muted colors, raw phone camera aesthetic, no cinematic look, borderless 2x3 grid.
+
+grid2_video_prompt = Animate each panel separately in full screen for 2.5 seconds. Global style: Raw iPhone footage, slight handheld shake only, no music.
+
+1 [Top-Left]: Animate snowfall while the cat waits quietly at the gate.
+
+2 [Top-Right]: Animate the family car arriving and stopping.
+
+3 [Mid-Left]: Animate the car door opening and the Golden Retriever jumping out excitedly.
+
+4 [Mid-Right]: Animate the dog sprinting toward the gate.
+
+5 [Bottom-Left]: Animate the reunion as the dog reaches and nuzzles the cat.
+
+6 [Bottom-Right]: Animate the family walking away carrying both animals while the empty gate remains behind.
+
+[END IDEA]

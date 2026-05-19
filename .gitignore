@@ -1,0 +1,6 @@
+.env
+videos/
+runs/
+.venv/
+__pycache__/
+*.pyc

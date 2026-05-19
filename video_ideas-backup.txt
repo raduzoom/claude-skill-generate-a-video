@@ -1,0 +1,65 @@
+# ================================================================
+# VIDEO IDEAS — YouTube Shorts Generation Pipeline
+# ================================================================
+
+#
+# HOW TO ADD AN IDEA:
+#   1. Copy an existing [IDEA] block and paste it below
+#   2. Fill in all fields for the new idea
+#   3. Separate each idea with a line of dashes (---)
+#
+# FIELDS:
+#   name              — Internal identifier (used in filenames and logs)
+#   title_examples    — One title per line. Claude will generate a NEW title
+#                        in this same style. Put your best examples here.
+#   hook_image_prompt — Image prompt for the Hook frame (Nanobanana 2, 2K, 9:16)
+#   hook_video_prompt — Video prompt for the Hook clip (4 seconds, keyframe mode)
+#   grid1_image_prompt— Image prompt for Grid 1 (uses Hook image as reference)
+#   grid1_video_prompt— Video prompt for Grid 1 clip (15 seconds, reference mode)
+#   grid2_image_prompt— Image prompt for Grid 2 (uses Grid 1 image as reference)
+#   grid2_video_prompt— Video prompt for Grid 2 clip (15 seconds, reference mode)
+#
+# TIPS:
+#   - Hook image sets the visual tone; it carries forward as a reference chain
+#   - Grid images should be story grids (multiple panels). Seedance 2.0 will
+#     animate the panels as a sequence using the video prompt as guidance.
+#   - Lines starting with # are ignored by the parser
+#
+# ================================================================
+
+---
+[name]
+Example Idea Name
+
+[title_examples]
+Replace this with a real title example
+Another example title in the same style
+A third example — the more examples the better
+
+[hook_image_prompt]
+Replace with your hook image prompt. This is the opening frame of your Short.
+Example: A dramatic close-up of a golden retriever at the edge of a cliff, golden hour lighting, cinematic 9:16 vertical composition, photorealistic, 2K resolution.
+
+[hook_video_prompt]
+Replace with your hook video prompt. This is a 4-second clip starting from the hook image.
+Example: Slow dramatic zoom into the dog's eyes, wind blowing fur, tense cinematic feel.
+
+[grid1_image_prompt]
+Replace with your Grid 1 image prompt. This should be a story grid (multiple panels showing a sequence). The hook image will be used as a visual reference.
+Example: A 4-panel vertical story grid: Panel 1 shows the dog looking down the cliff. Panel 2 shows the dog hesitating. Panel 3 shows the dog crouching. Panel 4 shows the dog leaping into the air. Cinematic, photorealistic, consistent character.
+
+[grid1_video_prompt]
+Replace with your Grid 1 video prompt. Seedance 2.0 will animate the story grid panels in sequence. This clip is 15 seconds.
+Example: Animate the 4 panels sequentially as a dramatic cinematic sequence. Panel 1 holds for 3 seconds, dog breathing nervously. Panel 2 the dog steps back, scared. Panel 3 the dog crouches and prepares. Panel 4 the dog leaps with dramatic slow motion, panels transition fluidly like a film reel.
+
+[grid2_image_prompt]
+Replace with your Grid 2 image prompt. Uses Grid 1 image as reference.
+Example: A 4-panel vertical story grid showing the aftermath: Panel 1 the dog soaring through the air. Panel 2 the dog splashing into water below. Panel 3 the dog swimming happily. Panel 4 the dog emerging victorious, shaking water off. Photorealistic, cinematic.
+
+[grid2_video_prompt]
+Replace with your Grid 2 video prompt. This clip is 15 seconds.
+Example: Animate the 4 panels as a triumphant finale. Panel 1 slow-motion flight through air. Panel 2 dramatic splash entry. Panel 3 smooth underwater swimming. Panel 4 the dog bursts out of the water in slow motion, joyful. End on a freeze-frame hero moment.
+
+---
+
+# Add more ideas below by copying the block above (from --- to the next ---)
