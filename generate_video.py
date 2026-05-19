@@ -107,21 +107,55 @@ def _kie_extract_url(result_json_str):
     raise RuntimeError(f"[KIE] Cannot extract image URL from result: {result}")
 
 
-# ── ENHANCOR (image) ───────────────────────────────────────────────────────────
-# Note: The Enhancor API provided covers video generation only.
-# Image generation (Nanobanana 2 equivalent) is not available via Enhancor.
-# IMAGE_PROVIDER must remain KIE.
+# ── ENHANCOR (Nano Banana 2 — image) ──────────────────────────────────────────
+# Base URL : https://apireq.enhancor.ai/api/nano-banana-2-new/v1
+# Auth     : x-api-key header
+# Submit   : POST /queue  →  {"success": true, "requestId": "..."}
+# Poll     : POST /status  with body {"request_id": "..."}
+# Reference images passed via input_images[] (up to 14 URLs)
 
-_ENHANCOR_BASE = "https://apireq.enhancor.ai/api/enhancor-video-pro/v1"
+_ENHANCOR_IMG_BASE   = "https://apireq.enhancor.ai/api/nano-banana-2-new/v1"
+_ENHANCOR_BASE       = "https://apireq.enhancor.ai/api/enhancor-video-pro/v1"
+
+def _enhancor_headers():
+    return {"x-api-key": ENHANCOR_KEY, "Content-Type": "application/json"}
 
 def _enhancor_submit_image(prompt, reference_url=None):
-    raise NotImplementedError(
-        "Enhancor does not provide an image generation API. "
-        "Keep IMAGE_PROVIDER=KIE in .env."
-    )
+    payload = {
+        "prompt": prompt,
+        "aspect_ratio": "9:16",
+        "resolution": "2K",
+        "webhook_url": "https://example.com/webhook",   # required field; we use polling
+    }
+    if reference_url:
+        payload["input_images"] = [reference_url]
 
-def _enhancor_poll_image(task_id):
-    raise NotImplementedError("Enhancor image generation is not supported.")
+    r = requests.post(f"{_ENHANCOR_IMG_BASE}/queue", headers=_enhancor_headers(), json=payload, timeout=30)
+    r.raise_for_status()
+    data = r.json()
+    request_id = data.get("requestId") or data.get("request_id")
+    if not request_id:
+        raise RuntimeError(f"[ENHANCOR IMG] No requestId in response: {data}")
+    print(f"    task: {request_id}")
+    return request_id
+
+def _enhancor_poll_image(request_id):
+    while True:
+        r = requests.post(
+            f"{_ENHANCOR_IMG_BASE}/status",
+            headers=_enhancor_headers(),
+            json={"request_id": request_id},
+            timeout=30,
+        )
+        r.raise_for_status()
+        d = r.json()
+        status = d.get("status", "PENDING")
+        if status == "COMPLETED":
+            return d["result"]
+        if status == "FAILED":
+            raise RuntimeError(f"[ENHANCOR IMG] Image task failed: {d.get('error', 'unknown')}")
+        print(f"    status: {status}...")
+        time.sleep(POLL_INTERVAL)
 
 
 # ── Provider router (images) ───────────────────────────────────────────────────
@@ -201,15 +235,12 @@ def _kinovi_poll_videos(task_id_map):
 
 # ── ENHANCOR (Seed 2 Unrestricted — video) ────────────────────────────────────
 # Endpoint : POST https://apireq.enhancor.ai/api/enhancor-video-pro/v1/queue
-# Auth     : x-api-key header
-# Polling  : GET  /status?request_id={id}
+# Auth     : x-api-key header  (same _enhancor_headers() defined above)
+# Polling  : POST /status  with body {"request_id": "..."}
 #
 # Mode mapping:
 #   keyframe  → first_n_last_frames  (image becomes the literal first frame)
 #   reference → multi_reference      (image used as creative guide via @image1)
-
-def _enhancor_headers():
-    return {"x-api-key": ENHANCOR_KEY, "Content-Type": "application/json"}
 
 def _enhancor_submit_video(image_url, prompt, duration_seconds, mode="keyframe"):
     if mode == "keyframe":
@@ -501,10 +532,8 @@ def check_env():
         if not KIE_KEY or KIE_KEY == "your_kie_api_key_here":
             errors.append("KIE_API_KEY is not set in .env")
     elif IMAGE_PROVIDER == "ENHANCOR":
-        errors.append(
-            "IMAGE_PROVIDER=ENHANCOR is not supported — Enhancor provides video only. "
-            "Keep IMAGE_PROVIDER=KIE."
-        )
+        if not ENHANCOR_KEY or ENHANCOR_KEY == "your_enhancor_api_key_here":
+            errors.append("ENHANCOR_API_KEY is not set in .env")
     else:
         errors.append(f"IMAGE_PROVIDER='{IMAGE_PROVIDER}' is not valid. Options: KIE | ENHANCOR")
 
