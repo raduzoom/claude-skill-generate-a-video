@@ -3,8 +3,8 @@
 AI Video Generation Pipeline
 Hook Image → Grid 1 Image → Grid 2 Image → 3 Videos → ffmpeg combine → upload
 
-Image providers : KIE | ENHANCOR   (set IMAGE_PROVIDER in .env)
-Video providers : KINOVI | ENHANCOR (set VIDEO_PROVIDER in .env)
+Image providers : KIE | ENHANCOR              (set IMAGE_PROVIDER in .env)
+Video providers : KINOVI | ENHANCOR | HIGGSFIELD (set VIDEO_PROVIDER in .env)
 """
 
 import json
@@ -25,9 +25,11 @@ BASE_DIR   = Path(__file__).parent
 IDEAS_FILE = BASE_DIR / "video_ideas.txt"
 VIDEOS_DIR = BASE_DIR / "videos"
 RUNS_DIR   = BASE_DIR / "runs"
+IMAGES_DIR = BASE_DIR / "images"
 
 VIDEOS_DIR.mkdir(exist_ok=True)
 RUNS_DIR.mkdir(exist_ok=True)
+IMAGES_DIR.mkdir(exist_ok=True)
 
 load_dotenv(BASE_DIR / ".env")
 
@@ -37,6 +39,12 @@ ENHANCOR_KEY = os.environ.get("ENHANCOR_API_KEY", "")
 
 IMAGE_PROVIDER = os.environ.get("IMAGE_PROVIDER", "KIE").upper().strip()
 VIDEO_PROVIDER = os.environ.get("VIDEO_PROVIDER", "KINOVI").upper().strip()
+
+# Higgsfield CLI path — override with HIGGSFIELD_CLI_PATH in .env
+HIGGSFIELD_CLI = os.environ.get(
+    "HIGGSFIELD_CLI_PATH",
+    os.path.expanduser("~/bin/higgsfield"),
+)
 
 POLL_INTERVAL = 5
 
@@ -270,7 +278,8 @@ def _enhancor_submit_video(image_url, prompt, duration_seconds, mode="keyframe")
         }
 
     r = requests.post(f"{_ENHANCOR_BASE}/queue", headers=_enhancor_headers(), json=payload, timeout=30)
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"[ENHANCOR] {r.status_code} submitting video: {r.text}")
     data = r.json()
     # API returns requestId (camelCase); fall back to request_id (snake_case)
     request_id = data.get("requestId") or data.get("request_id")
@@ -311,9 +320,263 @@ def _enhancor_poll_videos(task_id_map):
     return results
 
 
+# ── HIGGSFIELD (Seedance 2.0 — via CLI subprocess) ────────────────────────────
+# Requires: ~/bin/higgsfield (installed via install.sh) + `higgsfield auth login` run once.
+# Override CLI path with HIGGSFIELD_CLI_PATH in .env.
+#
+# Seedance 2.0 parameters (from model catalog):
+#   duration    : 4–15 seconds (continuous range)
+#   resolution  : 480p | 720p | 1080p
+#   mode        : std | fast
+#   Media roles:
+#     keyframe  → --start-image  (image locked as first frame)
+#     reference → --image        (image as style/identity reference)
+#
+# The CLI only accepts local file paths or upload UUIDs, not URLs.
+# Flow: download image → submit (get job_id) → stagger next → poll all concurrently.
+# Submissions are serialised with a 20s gap to avoid IP/rate-limit errors.
+
+def _higgsfield_parse_json(raw, label):
+    """Extract a JSON object from CLI stdout (may have non-JSON lines mixed in)."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        for line in reversed(raw.splitlines()):
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+    raise RuntimeError(f"[HIGGSFIELD] Cannot parse CLI output ({label}):\n{raw}")
+
+
+def _higgsfield_extract_url(data, label):
+    """Pull the video URL out of whatever JSON shape the CLI returned."""
+    item = data[0] if isinstance(data, list) and data else data
+    url = (
+        item.get("result_url")
+        or item.get("url")
+        or item.get("video_url")
+        or (item.get("results") or [{}])[0].get("url")
+        or (item.get("output") or [{}])[0].get("url")
+        or (item.get("jobs") or [{}])[0].get("result_url")
+    )
+    if not url:
+        raise RuntimeError(
+            f"[HIGGSFIELD] Cannot find video URL in response ({label}):\n"
+            + json.dumps(data, indent=2)
+        )
+    return url
+
+
+def _higgsfield_submit(label, image_url, prompt, duration, mode):
+    """
+    Download image to a temp file, submit a Seedance 2.0 job (no --wait),
+    return the job_id string. Temp file is cleaned up before returning.
+    """
+    clean_prompt = prompt.replace("@image1", "").strip()
+    duration_clamped = max(4, min(15, duration))
+    image_flag = "--start-image" if mode == "keyframe" else "--image"
+
+    # Accept either a URL or a local file path
+    if os.path.isfile(image_url):
+        tmp_path = image_url
+        needs_cleanup = False
+    else:
+        suffix = ".jpg" if any(x in image_url.lower() for x in ("jpg", "jpeg")) else ".png"
+        r = requests.get(image_url, timeout=60)
+        r.raise_for_status()
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as f:
+            f.write(r.content)
+            tmp_path = f.name
+        needs_cleanup = True
+
+    try:
+        cmd = [
+            HIGGSFIELD_CLI, "generate", "create", "seedance_2_0",
+            "--prompt", clean_prompt,
+            image_flag, tmp_path,
+            "--duration", str(duration_clamped),
+            "--resolution", "720p",
+            "--aspect_ratio", "9:16",   # underscore required — hyphen is rejected
+            "--json",
+        ]
+        print(f"    [{label}] submitting ({image_flag.lstrip('-')}, {duration_clamped}s)...")
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            if "Not authenticated" in stderr:
+                raise RuntimeError("[HIGGSFIELD] Not authenticated. Run: ~/bin/higgsfield auth login")
+            raise RuntimeError(f"[HIGGSFIELD] Submit error ({label}): {stderr}")
+
+        data = _higgsfield_parse_json(result.stdout.strip(), label)
+
+        # CLI may return: "id", ["id"], {"id":...}, [{"id":...}]
+        item = data[0] if isinstance(data, list) and data else data
+
+        # Plain string → it IS the job ID
+        if isinstance(item, str):
+            job_id = item
+        else:
+            job_id = (
+                item.get("id")
+                or item.get("job_id")
+                or (item.get("job") or {}).get("id")
+                or (item.get("jobs") or [{}])[0].get("id")
+            )
+
+        if not job_id:
+            # If CLI returned the finished video immediately (edge case), extract URL
+            try:
+                url = _higgsfield_extract_url(item, label)
+                print(f"    [{label}] instant result → {url}")
+                return ("DONE", url)     # sentinel: already complete
+            except RuntimeError:
+                pass
+            raise RuntimeError(
+                f"[HIGGSFIELD] Cannot find job_id in submit response ({label}):\n"
+                + json.dumps(data, indent=2)
+            )
+        print(f"    [{label}] queued as {job_id}")
+        return ("JOB", job_id)
+    finally:
+        if needs_cleanup:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+
+def _higgsfield_poll_one(label, job_id):
+    """Poll a submitted job until complete. Returns video URL."""
+    while True:
+        result = subprocess.run(
+            [HIGGSFIELD_CLI, "generate", "get", job_id, "--json"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"[HIGGSFIELD] Poll error ({label}): {result.stderr.strip()}")
+        data = _higgsfield_parse_json(result.stdout.strip(), label)
+        item = data[0] if isinstance(data, list) and data else data
+        status = (item.get("status") or "").upper()
+        if status in ("COMPLETED", "DONE", "SUCCESS"):
+            url = _higgsfield_extract_url(item, label)
+            print(f"    [{label}] done → {url}")
+            return url
+        if status in ("FAILED", "ERROR", "CANCELLED"):
+            raise RuntimeError(f"[HIGGSFIELD] Job failed ({label}): {item}")
+        print(f"    [{label}] {status or 'pending'}...")
+        time.sleep(15)
+
+
+def _higgsfield_generate_videos(jobs, jobs_file=None):
+    """
+    Higgsfield enforces a 2-concurrent-job limit per account.
+
+    Strategy:
+      1. Submit + fully complete the hook (4 s, fast) — 1 slot used then freed.
+      2. Submit grid1, wait 5 s, submit grid2 — 2 slots used simultaneously, OK.
+      3. Poll grid1 + grid2 concurrently.
+
+    jobs_file: optional Path — job IDs are saved here immediately after each
+    submit so a retry can resume polling without re-submitting.  If jobs_file
+    already contains IDs for any label those labels are skipped (no duplicate
+    submissions).
+
+    Returns {label: url}.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # ── Load any previously-saved job IDs (crash-resume) ─────────────────────
+    saved_ids = {}
+    if jobs_file and Path(jobs_file).exists():
+        for line in Path(jobs_file).read_text().splitlines():
+            if "=" in line:
+                lbl, jid = line.split("=", 1)
+                saved_ids[lbl.strip()] = jid.strip()
+        if saved_ids:
+            print(f"    [resume] found saved job IDs in {jobs_file}:")
+            for lbl, jid in saved_ids.items():
+                print(f"      {lbl} = {jid}")
+
+    def _save_id(label, job_id):
+        """Append/update label=job_id in jobs_file atomically."""
+        if not jobs_file:
+            return
+        p = Path(jobs_file)
+        existing = {}
+        if p.exists():
+            for line in p.read_text().splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    existing[k.strip()] = v.strip()
+        existing[label] = job_id
+        p.write_text("".join(f"{k}={v}\n" for k, v in existing.items()))
+
+    results = {}
+
+    # ── Step 1: hook ─────────────────────────────────────────────────────────
+    if "hook" in saved_ids:
+        print(f"    [hook] resuming existing job {saved_ids['hook']} (skipping submit)...")
+        results["hook"] = _higgsfield_poll_one("hook", saved_ids["hook"])
+    else:
+        hook_job = next(j for j in jobs if j["label"] == "hook")
+        print(f"    Completing hook first (frees a job slot for the grid videos)...")
+        kind, value = _higgsfield_submit(
+            hook_job["label"], hook_job["image_url"],
+            hook_job["prompt"], hook_job["duration"], hook_job["mode"],
+        )
+        if kind == "DONE":
+            results["hook"] = value
+        else:
+            _save_id("hook", value)
+            results["hook"] = _higgsfield_poll_one("hook", value)
+
+    # ── Step 2: grid1 + grid2 ─────────────────────────────────────────────────
+    grid_jobs = [j for j in jobs if j["label"] != "hook"]
+    grid_ids = {}
+    for i, j in enumerate(grid_jobs):
+        label = j["label"]
+        if label in saved_ids:
+            print(f"    [{label}] resuming existing job {saved_ids[label]} (skipping submit)...")
+            grid_ids[label] = saved_ids[label]
+        else:
+            if i > 0:
+                time.sleep(5)
+            kind, value = _higgsfield_submit(
+                label, j["image_url"], j["prompt"], j["duration"], j["mode"],
+            )
+            if kind == "DONE":
+                results[label] = value
+            else:
+                _save_id(label, value)
+                grid_ids[label] = value
+
+    # ── Step 3: poll grid1 + grid2 concurrently ───────────────────────────────
+    if grid_ids:
+        with ThreadPoolExecutor(max_workers=len(grid_ids)) as executor:
+            futures = {
+                executor.submit(_higgsfield_poll_one, label, jid): label
+                for label, jid in grid_ids.items()
+            }
+            for future in as_completed(futures):
+                label = futures[future]
+                results[label] = future.result()
+
+    # ── Clean up jobs file once all complete ──────────────────────────────────
+    if jobs_file and Path(jobs_file).exists():
+        try:
+            Path(jobs_file).unlink()
+        except OSError:
+            pass
+
+    return results
+
+
 # ── Provider router (videos) ───────────────────────────────────────────────────
 
-def generate_videos(jobs):
+def generate_videos(jobs, jobs_file=None):
     """
     Submit and poll all video jobs concurrently.
 
@@ -323,6 +586,7 @@ def generate_videos(jobs):
         prompt         – video prompt text
         duration       – int seconds
         mode           – "keyframe" | "reference"
+    jobs_file: optional Path — Higgsfield-only, used to save/resume job IDs.
 
     Returns: {label: video_url}
     """
@@ -342,8 +606,11 @@ def generate_videos(jobs):
             )
         return _enhancor_poll_videos(task_id_map)
 
+    elif VIDEO_PROVIDER == "HIGGSFIELD":
+        return _higgsfield_generate_videos(jobs, jobs_file=jobs_file)
+
     else:
-        raise ValueError(f"Unknown VIDEO_PROVIDER: '{VIDEO_PROVIDER}'. Options: KINOVI | ENHANCOR")
+        raise ValueError(f"Unknown VIDEO_PROVIDER: '{VIDEO_PROVIDER}'. Options: KINOVI | ENHANCOR | HIGGSFIELD")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -356,6 +623,16 @@ def download_file(url, path):
     with open(path, "wb") as f:
         for chunk in r.iter_content(chunk_size=65536):
             f.write(chunk)
+
+
+def save_image(url, img_dir, label):
+    """Download image URL to img_dir/<label>.jpg and return the local path."""
+    ext = "jpg" if any(x in url.lower() for x in ("jpg", "jpeg")) else "png"
+    dest = img_dir / f"{label}.{ext}"
+    download_file(url, dest)
+    return dest
+
+
 
 
 def combine_videos(part_paths, output_path):
@@ -543,8 +820,16 @@ def check_env():
     elif VIDEO_PROVIDER == "ENHANCOR":
         if not ENHANCOR_KEY or ENHANCOR_KEY == "your_enhancor_api_key_here":
             errors.append("ENHANCOR_API_KEY is not set in .env")
+    elif VIDEO_PROVIDER == "HIGGSFIELD":
+        import shutil as _shutil
+        cli = os.path.expanduser(os.environ.get("HIGGSFIELD_CLI_PATH", "~/bin/higgsfield"))
+        if not _shutil.which(cli) and not os.path.isfile(cli):
+            errors.append(
+                f"HIGGSFIELD_CLI_PATH not found at '{cli}'. "
+                "Install: curl -fsSL https://raw.githubusercontent.com/higgsfield-ai/cli/main/install.sh | sh -s -- --prefix=$HOME"
+            )
     else:
-        errors.append(f"VIDEO_PROVIDER='{VIDEO_PROVIDER}' is not valid. Options: KINOVI | ENHANCOR")
+        errors.append(f"VIDEO_PROVIDER='{VIDEO_PROVIDER}' is not valid. Options: KINOVI | ENHANCOR | HIGGSFIELD")
 
     if errors:
         for e in errors:
@@ -557,6 +842,15 @@ def check_env():
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--idea", default=None, help="Partial idea name to select (case-insensitive). Omit for random.")
+    parser.add_argument(
+        "--from-images", default=None, metavar="DIR",
+        help="Skip image generation — reuse images from this directory (images/TIMESTAMP_slug/).",
+    )
+    args = parser.parse_args()
+
     check_env()
 
     ideas = parse_ideas_file(IDEAS_FILE)
@@ -564,7 +858,16 @@ def main():
         print("ERROR: No ideas found in video_ideas.txt (add your own ideas first)", file=sys.stderr)
         sys.exit(1)
 
-    idea = random.choice(ideas)
+    if args.idea:
+        query = args.idea.lower()
+        matches = [i for i in ideas if query in i["name"].lower()]
+        if not matches:
+            names = ", ".join(f'"{i["name"]}"' for i in ideas)
+            print(f"ERROR: No idea matching '{args.idea}'. Available: {names}", file=sys.stderr)
+            sys.exit(1)
+        idea = matches[0]
+    else:
+        idea = random.choice(ideas)
     ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
     slug = idea["name"].lower().replace(" ", "-")
 
@@ -574,19 +877,67 @@ def main():
     print(f"  Video provider: {VIDEO_PROVIDER}")
     print(f"{'='*60}\n")
 
-    # ── Images (sequential — each uses previous as style reference) ──
+    # ── Images ──────────────────────────────────────────────────────────────────
+    # Each image is saved to images/<ts>_<slug>/ immediately after generation.
+    # Use --from-images <dir> on a retry to skip regeneration entirely.
 
-    print("[1/3] Generating Hook Image...")
-    hook_img = generate_image(idea["hook_image_prompt"])
-    print(f"    -> {hook_img}\n")
+    if args.from_images:
+        img_dir = Path(args.from_images)
+        if not img_dir.is_dir():
+            print(f"ERROR: --from-images directory not found: {img_dir}", file=sys.stderr)
+            sys.exit(1)
+        urls_file = img_dir / "urls.txt"
+        if not urls_file.exists():
+            print(f"ERROR: {urls_file} not found. Only dirs created by this script support --from-images.", file=sys.stderr)
+            sys.exit(1)
+        urls = dict(
+            line.split("=", 1)
+            for line in urls_file.read_text().splitlines()
+            if "=" in line
+        )
+        # Prefer local file paths for video jobs (URLs in urls.txt may have expired).
+        # Fall back to the stored URL only if no local file is found.
+        def _local_or_url(label):
+            for ext in ("jpg", "jpeg", "png"):
+                p = img_dir / f"{label}.{ext}"
+                if p.exists():
+                    return str(p)
+            return urls[label]
 
-    print("[2/3] Generating Grid 1 Image  (reference: hook)...")
-    grid1_img = generate_image(idea["grid1_image_prompt"], reference_url=hook_img)
-    print(f"    -> {grid1_img}\n")
+        hook_img  = _local_or_url("hook")
+        grid1_img = _local_or_url("grid1")
+        grid2_img = _local_or_url("grid2")
+        print(f"[--from-images] Reusing images from {img_dir}")
+        print(f"  hook  -> {hook_img}")
+        print(f"  grid1 -> {grid1_img}")
+        print(f"  grid2 -> {grid2_img}\n")
+    else:
+        img_dir = IMAGES_DIR / f"{ts}_{slug}"
+        img_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[3/3] Generating Grid 2 Image  (reference: grid 1)...")
-    grid2_img = generate_image(idea["grid2_image_prompt"], reference_url=grid1_img)
-    print(f"    -> {grid2_img}\n")
+        print("[1/3] Generating Hook Image...")
+        hook_img = generate_image(idea["hook_image_prompt"])
+        save_image(hook_img, img_dir, "hook")
+        print(f"    -> {hook_img}")
+        print(f"    saved: {img_dir}/hook.jpg\n")
+
+        print("[2/3] Generating Grid 1 Image  (reference: hook)...")
+        grid1_img = generate_image(idea["grid1_image_prompt"], reference_url=hook_img)
+        save_image(grid1_img, img_dir, "grid1")
+        print(f"    -> {grid1_img}")
+        print(f"    saved: {img_dir}/grid1.jpg\n")
+
+        print("[3/3] Generating Grid 2 Image  (reference: grid 1)...")
+        grid2_img = generate_image(idea["grid2_image_prompt"], reference_url=grid1_img)
+        save_image(grid2_img, img_dir, "grid2")
+        print(f"    -> {grid2_img}")
+        print(f"    saved: {img_dir}/grid2.jpg\n")
+
+        # Save URLs for retry with --from-images
+        (img_dir / "urls.txt").write_text(
+            f"hook={hook_img}\ngrid1={grid1_img}\ngrid2={grid2_img}\n"
+        )
+        print(f"  Images saved to: {img_dir}\n")
 
     # ── Videos (submit all 3 at once, poll concurrently) ──
 
@@ -599,7 +950,7 @@ def main():
         {"label": "hook",  "image_url": hook_img,  "prompt": idea["hook_video_prompt"],  "duration": 4,  "mode": "keyframe"},
         {"label": "grid1", "image_url": grid1_img, "prompt": idea["grid1_video_prompt"], "duration": 15, "mode": "reference"},
         {"label": "grid2", "image_url": grid2_img, "prompt": idea["grid2_video_prompt"], "duration": 15, "mode": "reference"},
-    ])
+    ], jobs_file=img_dir / "video_jobs.txt")
 
     print(f"\n    hook   -> {video_urls['hook']}")
     print(f"    grid1  -> {video_urls['grid1']}")

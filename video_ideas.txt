@@ -1,75 +1,103 @@
 [IDEA]
 
-name = The Cat Waited At The Shelter Gate
+name = The Warrior And The Arrow
 
 # Hook (opening image + motion prompt)
 
-hook_image_prompt = A raw, unfiltered eye-level mobile phone photograph showing the entrance of an old rural animal shelter during cold late autumn. A rusty metal gate stands half open. Sitting directly in front of it is a small orange-and-white rescue cat with messy fur and a faded blue collar. Next to the cat lies a worn dog toy rope with bite marks. In the background, inside the fenced yard, a young Golden Retriever puppy is being carried away by a family toward a car. The puppy is looking back toward the cat. Flat cloudy daylight, muted colors, slightly desaturated, realistic dirt textures, no cinematic grading, iPhone realism, vertical 9:16.
+hook_image_prompt = A raw, dramatic eye-level image of a lone ancient warrior standing motionless in the middle of a battlefield at dawn. Arrows are frozen mid-air around him, inches away from impact. Broken shields, dust, fallen banners, smoke in the distance. The warrior remains calm, eyes forward, hand resting on his sword but not drawing it. Cold blue dawn light, realistic textures, cinematic realism, vertical 9:16.
 
-hook_video_prompt = Static handheld camera, no zoom, no camera movement, slight natural handheld shake only. Filmed on iPhone. Animate the scene naturally. The family slowly walks away carrying the puppy while the orange-white cat remains motionless near the gate. The puppy looks back and whimpers softly. Wind moves dry leaves across the ground. No music. Important sound effects: puppy crying softly, distant shelter ambience, wind.
+hook_video_prompt = Static camera with slight handheld movement only. Time appears slowed. Dust moves through the air. Arrows slowly pass by the warrior but he does not react. Cloth and hair move in the wind. Deep battlefield ambience. No music. Distant metal sounds and wind.
 
 # Grid 1 (story panel 1 — uses Hook image as reference)
 
-grid1_image_prompt = A 2x3 grid of six borderless raw mobile phone photographs continuing the emotional story. Visual consistency with the orange-white rescue cat, blue collar, Golden Retriever puppy, old shelter entrance and muted autumn colors.
+grid1_image_prompt = A 2x3 grid of six cinematic action panels with the same warrior.
 
-Panel 1: Interior shelter room. The puppy and cat sleep together inside a small blanket basket.
+Panel 1: Young warrior training alone in heavy rain while others rest.
 
-Panel 2: Outdoor shelter yard. The puppy and cat play together with the rope toy lying on dusty ground.
+Panel 2: Enemy soldiers mocking him while he remains silent.
 
-Panel 3: Close eye-level shot. The puppy licks the cat while the cat closes its eyes peacefully.
+Panel 3: Warrior carrying stones uphill alone at sunrise.
 
-Panel 4: Shelter entrance. A smiling family kneels beside the Golden Retriever puppy preparing adoption papers.
+Panel 4: Close-up — someone insults him face to face. He does not react.
 
-Panel 5: The puppy is being carried toward the parked car while looking back toward the gate.
+Panel 5: Battlefield preparation. Others panic while he calmly sharpens his sword.
 
-Panel 6: The orange-white cat sits alone at the shelter gate after sunset. The rope toy lies beside it.
+Panel 6: Return to battlefield. The warrior stands still as arrows fly.
 
-Lighting and Atmosphere: Cloudy autumn daylight, muted colors, realistic shelter environment, no cinematic grading, raw iPhone look, borderless 2x3 grid.
+Atmosphere: realism, dust, sweat, grit, muted colors, cinematic stoic energy.
 
-grid1_video_prompt = Animate each panel separately for 2.5 seconds. Global style: Raw handheld iPhone footage with natural shake only. No zoom or cinematic movement. No music.
+grid1_video_prompt = Animate each panel separately.
 
-1 [Top-Left]: Animate both animals sleeping quietly together; subtle breathing motion.
+1: Heavy rain while warrior trains continuously.
 
-2 [Top-Right]: Animate the puppy running circles while the cat bats the rope toy.
+2: Soldiers laugh and point; warrior stays still.
 
-3 [Mid-Left]: Animate the puppy gently licking the cat; cat slowly closes eyes.
+3: He carries stones uphill with effort.
 
-4 [Mid-Right]: Animate the family kneeling and smiling while interacting with the puppy.
+4: Angry man shouting inches from his face; warrior remains calm.
 
-5 [Bottom-Left]: Animate the family carrying the puppy toward the car while it turns back.
+5: Soldiers rush chaotically while he sharpens his blade.
 
-6 [Bottom-Right]: Animate evening wind moving leaves while the cat waits alone at the gate.
+6: Battlefield arrows pass around him in slow motion.
 
 # Grid 2 (story panel 2 — uses Grid 1 image as reference)
 
-grid2_image_prompt = A 2x3 grid of six borderless raw mobile phone photographs continuing the story with visual consistency: orange-white cat with blue collar, Golden Retriever puppy, realistic rural environment.
+grid2_image_prompt = A 2x3 action finale grid.
 
-Panel 1: Winter morning outside the shelter. Snow on the ground. The cat still waits near the same gate.
+Panel 1: Enemy army charging full speed.
 
-Panel 2: Wide road shot. A family car stops outside the shelter.
+Panel 2: Everyone around him begins retreating.
 
-Panel 3: Car door opens. The now slightly older Golden Retriever jumps out excitedly.
+Panel 3: Warrior takes one calm breath and steps forward alone.
 
-Panel 4: The dog runs at full speed toward the shelter gate.
+Panel 4: Close-up of determined eyes.
 
-Panel 5: Emotional reunion. The Golden Retriever reaches the cat and presses its head against it.
+Panel 5: He raises his sword and leads the counterattack.
 
-Panel 6: Final eye-level photo. The family walks away together carrying both the cat and dog. The old rope toy remains on the empty ground near the shelter gate.
+Panel 6: Sunset aftermath. Battlefield quiet. Warrior sits alone cleaning his sword while others celebrate behind him.
 
-Lighting and Atmosphere: Cold winter daylight, realistic snow textures, muted colors, raw phone camera aesthetic, no cinematic look, borderless 2x3 grid.
+Atmosphere: dust, motion, realism, stoic strength.
 
-grid2_video_prompt = Animate each panel separately in full screen for 2.5 seconds. Global style: Raw iPhone footage, slight handheld shake only, no music.
+grid2_video_prompt = Animate each panel.
 
-1 [Top-Left]: Animate snowfall while the cat waits quietly at the gate.
+1: Massive charge toward camera.
 
-2 [Top-Right]: Animate the family car arriving and stopping.
+2: Soldiers running back in fear.
 
-3 [Mid-Left]: Animate the car door opening and the Golden Retriever jumping out excitedly.
+3: Warrior calmly steps forward.
 
-4 [Mid-Right]: Animate the dog sprinting toward the gate.
+4: Wind moves hair and cloak.
 
-5 [Bottom-Left]: Animate the reunion as the dog reaches and nuzzles the cat.
+5: Fast action charge sequence.
 
-6 [Bottom-Right]: Animate the family walking away carrying both animals while the empty gate remains behind.
+6: Silent sunset ending while he cleans the blade.
+
+# Narration (34 seconds)
+
+“Everyone wants strength…
+
+But nobody wants the rain.
+
+Nobody wants the insults.
+
+Nobody wants the lonely mornings.
+
+The Stoics understood something most people never will…
+
+You do not become strong in battle.
+
+You become strong before it.
+
+In silence.
+
+In discipline.
+
+In moments nobody sees.
+
+Because when chaos finally arrives…
+
+The trained mind does not panic.
+
+It steps forward.”
 
 [END IDEA]
