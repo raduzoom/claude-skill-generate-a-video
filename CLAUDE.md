@@ -16,6 +16,20 @@ Automated YouTube Shorts pipeline. Given an idea defined in `video_ideas.txt`, i
 .venv/bin/python3 generate_video.py --idea "Fake Stoicism"
 ```
 
+### Post-processing (WaveSpeed Topaz) — PAID
+
+Optional, never runs by default. Needs `WAVESPEED_API_KEY` in `.env`. The price is printed before each submit, and the job id is saved to `runs/<name>_wavespeed.json` before polling. An agent must get the user's explicit yes (with the price) before each run (`~/Dropbox/Configs/claude/.claude/guides/paid-generation.md`).
+
+```bash
+# In the pipeline, after combine_videos()
+.venv/bin/python3 generate_video.py --idea "Fake Stoicism" --upscale --interpolate 48
+
+# Standalone on a local file (writes IN_up_48fps.mp4 next to it)
+.venv/bin/python3 generate_video.py --postprocess IN.mp4 --upscale --interpolate 48
+```
+
+Options: `--upscale-model` (Proteus), `--upscale-res` (720p/1080p/2k/4k), `--interpolate-model` (Apollo). Upscale runs first, then interpolation. Interpolation can blend frames across hard cuts: check frames either side of each cut. Upscaling a file already at 1080×1920 to `1080p` only enhances it.
+
 ### First-time setup
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -30,6 +44,8 @@ Set `IMAGE_PROVIDER` and `VIDEO_PROVIDER` in `.env`:
 |---|---|
 | `IMAGE_PROVIDER` | `KIE` (default) · `ENHANCOR` |
 | `VIDEO_PROVIDER` | `KINOVI` · `ENHANCOR` · `HIGGSFIELD` |
+
+WaveSpeed is a post-processing provider only (flags above, not an env switch).
 
 Each provider needs its own API key (or CLI auth) in `.env`. All providers expose the same logical interface — swapping one does not require any code change.
 

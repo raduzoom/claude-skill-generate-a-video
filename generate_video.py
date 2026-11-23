@@ -8,6 +8,7 @@ Video providers : KINOVI | ENHANCOR | HIGGSFIELD (set VIDEO_PROVIDER in .env)
 """
 
 import json
+import mimetypes
 import os
 import re as _re
 import random
@@ -36,6 +37,7 @@ load_dotenv(BASE_DIR / ".env")
 KIE_KEY      = os.environ.get("KIE_API_KEY", "")
 KINOVI_KEY   = os.environ.get("KINOVI_API_KEY", "")
 ENHANCOR_KEY = os.environ.get("ENHANCOR_API_KEY", "")
+WAVESPEED_KEY = os.environ.get("WAVESPEED_API_KEY", "")
 
 IMAGE_PROVIDER = os.environ.get("IMAGE_PROVIDER", "KIE").upper().strip()
 VIDEO_PROVIDER = os.environ.get("VIDEO_PROVIDER", "KINOVI").upper().strip()
@@ -257,6 +259,7 @@ def _enhancor_submit_video(image_url, prompt, duration_seconds, mode="keyframe")
             "mode": "first_n_last_frames",
             "first_frame_image": image_url,
             "prompt": prompt,
+            "full_access": "true",
             "duration": str(duration_seconds),
             "resolution": "1080p",
             "aspect_ratio": "9:16",
@@ -273,6 +276,7 @@ def _enhancor_submit_video(image_url, prompt, duration_seconds, mode="keyframe")
             "prompt": prompt,
             "duration": str(duration_seconds),
             "resolution": "1080p",
+            "full_access": "true",
             "aspect_ratio": "9:16",
             "webhook_url": "https://example.com/webhook",   # required field; we use polling
         }
@@ -675,6 +679,126 @@ def upload_video_file(file_path):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# POST-PROCESSING PROVIDERS  (WaveSpeed · Topaz)  — every run is PAID
+# ══════════════════════════════════════════════════════════════════════════════
+# Auth    : Authorization: Bearer <WAVESPEED_API_KEY>
+# Upload  : POST /media/uploads (ticket) → PUT bytes to data.upload.url (no auth header)
+# Submit  : POST /topaz/video/upscale | /topaz/video/frame-interpolation → data.id
+# Poll    : GET /predictions/{id}/result → data.status / data.outputs[0]
+# Quote   : POST /model/price {model_id, input} → data.price (USD)
+# The submit POST is NEVER retried (a retry would create a second billed job).
+
+_WAVESPEED_BASE = "https://api.wavespeed.ai/api/v3"
+
+def _wavespeed_headers():
+    return {"Authorization": f"Bearer {WAVESPEED_KEY}", "Content-Type": "application/json"}
+
+
+def _wavespeed_upload(path):
+    """Upload a local file via direct upload, return its download URL (valid 7 days, max 200 MB)."""
+    path = Path(path)
+    ctype = mimetypes.guess_type(path.name)[0] or "video/mp4"
+    r = requests.post(
+        f"{_WAVESPEED_BASE}/media/uploads", headers=_wavespeed_headers(), timeout=60,
+        json={"filename": path.name, "size": path.stat().st_size, "content_type": ctype},
+    )
+    r.raise_for_status()
+    data = r.json()["data"]
+    up = data["upload"]
+    with open(path, "rb") as f:
+        put = requests.request(up.get("method", "PUT"), up["url"], headers=up.get("headers", {}), data=f, timeout=600)
+    put.raise_for_status()
+    return data["download_url"]
+
+
+def _wavespeed_quote(endpoint, body):
+    """Return the USD price for a job, or None if the quote is unavailable."""
+    try:
+        r = requests.post(
+            f"{_WAVESPEED_BASE}/model/price", headers=_wavespeed_headers(), timeout=30,
+            json={"model_id": endpoint, "input": body},
+        )
+        r.raise_for_status()
+        return r.json()["data"]["discounted_price"]
+    except (requests.RequestException, KeyError, ValueError):
+        return None
+
+
+def _wavespeed_submit(endpoint, body):
+    r = requests.post(f"{_WAVESPEED_BASE}/{endpoint}", headers=_wavespeed_headers(), json=body, timeout=120)
+    r.raise_for_status()
+    return r.json()["data"]["id"]
+
+
+def _wavespeed_poll(job_id):
+    while True:
+        try:
+            r = requests.get(f"{_WAVESPEED_BASE}/predictions/{job_id}/result", headers=_wavespeed_headers(), timeout=60)
+            if r.status_code == 429 or r.status_code >= 500:
+                time.sleep(10)
+                continue
+            r.raise_for_status()
+        except requests.RequestException as e:
+            print(f"    poll error, retrying: {e}")
+            time.sleep(10)
+            continue
+        data = r.json()["data"]
+        status = data["status"]
+        if status == "completed":
+            return data["outputs"][0]
+        if status in ("failed", "cancelled", "timeout", "deleted"):
+            raise RuntimeError(f"WaveSpeed job {job_id} {status}: {data.get('error')}")
+        time.sleep(POLL_INTERVAL)
+
+
+def _wavespeed_run(label, endpoint, body, src, dst, jobs_file):
+    """Upload src, quote, submit once, save the id, poll, download to dst. Returns a record dict."""
+    print(f"  [{label}] uploading {Path(src).name}...")
+    body = {"video": _wavespeed_upload(src), **body}
+    price = _wavespeed_quote(endpoint, body)
+    print(f"  [{label}] price: {'$%.2f' % price if price is not None else 'unknown (quote unavailable)'}")
+    job_id = _wavespeed_submit(endpoint, body)
+    record = {"label": label, "endpoint": endpoint, "id": job_id, "price_usd": price,
+              "params": {k: v for k, v in body.items() if k != "video"}}
+    jobs = json.loads(jobs_file.read_text()) if jobs_file.exists() else []
+    jobs_file.write_text(json.dumps(jobs + [record], indent=2))   # id saved before polling
+    print(f"  [{label}] submitted {job_id}, waiting...")
+    record["output_url"] = _wavespeed_poll(job_id)
+    download_file(record["output_url"], dst)
+    return record
+
+
+def topaz_upscale(src, dst, jobs_file, model="Proteus", res="1080p"):
+    return _wavespeed_run("upscale", "topaz/video/upscale",
+                          {"model": model, "target_resolution": res}, src, dst, jobs_file)
+
+
+def topaz_interpolate(src, dst, jobs_file, model="Apollo", fps=48, res="1080p"):
+    return _wavespeed_run("interpolate", "topaz/video/frame-interpolation",
+                          {"model": model, "resolution": res, "fps": fps, "slowmo": 1}, src, dst, jobs_file)
+
+
+def postprocess_video(src, dst, jobs_file, upscale=None, interpolate=None):
+    """
+    Chain Topaz steps on src, write the result to dst. Returns the list of job records.
+
+    upscale     : None or {"model": ..., "res": ...}
+    interpolate : None or {"model": ..., "fps": ..., "res": ...}
+    """
+    src, dst = Path(src), Path(dst)
+    records = []
+    with tempfile.TemporaryDirectory() as tmp:
+        current = src
+        if upscale:
+            out = dst if not interpolate else Path(tmp) / "upscaled.mp4"
+            records.append(topaz_upscale(current, out, jobs_file, **upscale))
+            current = out
+        if interpolate:
+            records.append(topaz_interpolate(current, dst, jobs_file, **interpolate))
+    return records
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # IDEAS FILE PARSER
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -753,7 +877,7 @@ def parse_ideas_file(path):
 # RUN DOCUMENT
 # ══════════════════════════════════════════════════════════════════════════════
 
-def save_run_doc(run_file, idea, images, videos, final_path, share_url):
+def save_run_doc(run_file, idea, images, videos, final_path, share_url, post_jobs=None):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     lines = [
         f"RUN DATE:        {ts}",
@@ -795,6 +919,12 @@ def save_run_doc(run_file, idea, images, videos, final_path, share_url):
         f"Local File:  {final_path}",
         f"Share URL:   {share_url}",
     ]
+    if post_jobs:
+        lines += ["", "=== POST-PROCESSING (WaveSpeed Topaz) ===", ""]
+        for j in post_jobs:
+            price = f"${j['price_usd']:.2f}" if j["price_usd"] is not None else "unknown"
+            lines.append(f"{j['label']}: id={j['id']} price={price} params={j['params']}")
+            lines.append(f"    output: {j['output_url']}")
     run_file.write_text("\n".join(lines))
 
 
@@ -802,7 +932,13 @@ def save_run_doc(run_file, idea, images, videos, final_path, share_url):
 # STARTUP CHECKS
 # ══════════════════════════════════════════════════════════════════════════════
 
-def check_env():
+def check_env_wavespeed_only():
+    if not WAVESPEED_KEY:
+        print("ERROR: WAVESPEED_API_KEY is not set in .env", file=sys.stderr)
+        sys.exit(1)
+
+
+def check_env(need_wavespeed=False):
     errors = []
 
     if IMAGE_PROVIDER == "KIE":
@@ -831,6 +967,9 @@ def check_env():
     else:
         errors.append(f"VIDEO_PROVIDER='{VIDEO_PROVIDER}' is not valid. Options: KINOVI | ENHANCOR | HIGGSFIELD")
 
+    if need_wavespeed and not WAVESPEED_KEY:
+        errors.append("WAVESPEED_API_KEY is not set in .env (needed for --upscale / --interpolate)")
+
     if errors:
         for e in errors:
             print(f"ERROR: {e}", file=sys.stderr)
@@ -849,9 +988,38 @@ def main():
         "--from-images", default=None, metavar="DIR",
         help="Skip image generation — reuse images from this directory (images/TIMESTAMP_slug/).",
     )
+    parser.add_argument("--upscale", action="store_true", help="PAID: Topaz upscale (WaveSpeed) after combining.")
+    parser.add_argument("--upscale-model", default="Proteus", help="Topaz upscale model (default Proteus).")
+    parser.add_argument("--upscale-res", default="1080p", choices=["720p", "1080p", "2k", "4k"])
+    parser.add_argument("--interpolate", type=int, default=None, metavar="FPS",
+                        choices=[30, 48, 50, 60, 120], help="PAID: Topaz frame interpolation to FPS (WaveSpeed).")
+    parser.add_argument("--interpolate-model", default="Apollo", help="Topaz interpolation model (default Apollo).")
+    parser.add_argument("--postprocess", default=None, metavar="IN.mp4",
+                        help="Skip the pipeline: run --upscale / --interpolate on this local file.")
     args = parser.parse_args()
 
-    check_env()
+    upscale = {"model": args.upscale_model, "res": args.upscale_res} if args.upscale else None
+    interpolate = {"model": args.interpolate_model, "fps": args.interpolate} if args.interpolate else None
+
+    if args.postprocess:
+        if not (upscale or interpolate):
+            print("ERROR: --postprocess needs --upscale and/or --interpolate FPS", file=sys.stderr)
+            sys.exit(1)
+        check_env_wavespeed_only()
+        src = Path(args.postprocess)
+        if not src.is_file():
+            print(f"ERROR: file not found: {src}", file=sys.stderr)
+            sys.exit(1)
+        suffix = ("_up" if upscale else "") + (f"_{interpolate['fps']}fps" if interpolate else "")
+        dst = src.with_name(f"{src.stem}{suffix}.mp4")
+        if dst.exists():
+            print(f"ERROR: {dst} already exists", file=sys.stderr)
+            sys.exit(1)
+        postprocess_video(src, dst, RUNS_DIR / f"{dst.stem}_wavespeed.json", upscale, interpolate)
+        print(f"    -> {dst}")
+        return
+
+    check_env(need_wavespeed=bool(upscale or interpolate))
 
     ideas = parse_ideas_file(IDEAS_FILE)
     if not ideas:
@@ -975,6 +1143,15 @@ def main():
 
     print(f"    -> {output_path}\n")
 
+    post_jobs = []
+    if upscale or interpolate:
+        print("Post-processing (WaveSpeed Topaz, PAID)...")
+        suffix = ("_up" if upscale else "") + (f"_{interpolate['fps']}fps" if interpolate else "")
+        post_path = VIDEOS_DIR / f"{ts}_{slug}{suffix}.mp4"
+        post_jobs = postprocess_video(output_path, post_path, RUNS_DIR / f"{ts}_{slug}_wavespeed.json", upscale, interpolate)
+        output_path = post_path
+        print(f"    -> {output_path}\n")
+
     print("Uploading...")
     share_url = upload_video_file(output_path)
     print(f"    -> {share_url}\n")
@@ -988,6 +1165,7 @@ def main():
         videos=video_urls,
         final_path=output_path,
         share_url=share_url,
+        post_jobs=post_jobs,
     )
 
     # ── Output JSON for Claude to parse ──
